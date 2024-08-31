@@ -5,6 +5,8 @@ services:
     container_name: server
     image: server:latest
     entrypoint: python3 /main.py
+    volumes:
+      - ./server/config.ini:/config.ini
     environment:
       - PYTHONUNBUFFERED=1
       - LOGGING_LEVEL=DEBUG
@@ -15,6 +17,8 @@ services:
     container_name: client1
     image: client:latest
     entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
     environment:
       - CLI_ID=1
       - CLI_LOG_LEVEL=DEBUG
@@ -27,6 +31,8 @@ services:
     container_name: client2
     image: client:latest
     entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
     environment:
       - CLI_ID=2
       - CLI_LOG_LEVEL=DEBUG
@@ -39,6 +45,8 @@ services:
     container_name: client3
     image: client:latest
     entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
     environment:
       - CLI_ID=3
       - CLI_LOG_LEVEL=DEBUG
@@ -51,6 +59,8 @@ services:
     container_name: client4
     image: client:latest
     entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
     environment:
       - CLI_ID=4
       - CLI_LOG_LEVEL=DEBUG
@@ -63,6 +73,8 @@ services:
     container_name: client5
     image: client:latest
     entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
     environment:
       - CLI_ID=5
       - CLI_LOG_LEVEL=DEBUG
