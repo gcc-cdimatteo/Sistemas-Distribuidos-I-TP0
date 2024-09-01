@@ -1,10 +1,10 @@
 import csv
 import datetime
 import time
-
+import logging
 
 """ Bets storage location. """
-STORAGE_FILEPATH = "./bets.csv"
+STORAGE_FILEPATH = "bets.csv"
 """ Simulated winner number in the lottery contest. """
 LOTTERY_WINNER_NUMBER = 7574
 
@@ -38,6 +38,28 @@ def store_bets(bets: list[Bet]) -> None:
         for bet in bets:
             writer.writerow([bet.agency, bet.first_name, bet.last_name,
                              bet.document, bet.birthdate, bet.number])
+            logging.info(f'action: apuesta_almacenada | result: success | dni: ${bet.document} | numero: ${bet.number}')
+
+"""
+Get Bets from client message
+"""
+def get_bets(msg: str) -> list[Bet]:
+    bets = []
+    for bet in msg.split('\n'):
+        values = bet.split('|')
+        if len(values) < 5: return bets
+        logging.debug(f"append bet with values {values}")
+        bets.append(
+            Bet(
+                agency = values[0],
+                first_name = values[1],
+                last_name = values[2],
+                document = values[3],
+                birthdate = values[4],
+                number = values[5]
+            )
+        )
+    return bets
 
 """
 Loads the information all the bets in the STORAGE_FILEPATH file.

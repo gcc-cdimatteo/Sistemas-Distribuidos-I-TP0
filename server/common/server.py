@@ -1,6 +1,8 @@
 import socket
 import logging
 import signal
+import struct
+from common.utils import store_bets, get_bets
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -42,12 +44,28 @@ class Server:
         client socket will also be closed
         """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
+            raw_msg_length = client_sock.recv(4)
+            if not raw_msg_length: return
+
+            msg_length = struct.unpack('!I', raw_msg_length)[0]
+
+            ## Read Full Message
+            msg = b''
+            while len(msg) < msg_length:
+                packet = client_sock.recv(msg_length - len(msg))
+                if not packet: return
+                msg += packet
+
+            ## Save Client Address
             addr = client_sock.getpeername()
             self.clients_connected.append(addr)
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            # TODO: Modify the send to avoid short-writes
+
+            msg = msg.decode('utf-8')
+
+            ## Store Bets
+            store_bets(get_bets(msg))
+
+            ## Resend message
             client_sock.send("{}\n".format(msg).encode('utf-8'))
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
