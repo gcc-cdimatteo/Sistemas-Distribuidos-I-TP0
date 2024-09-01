@@ -1,8 +1,7 @@
 import socket
 import logging
 import signal
-import struct
-from common.utils import store_bets, get_bets
+from common.utils import store_bets, get_bets, get_msg_length, get_full_message, send_full_message
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -44,29 +43,19 @@ class Server:
         client socket will also be closed
         """
         try:
-            raw_msg_length = client_sock.recv(4)
-            if not raw_msg_length: return
+            msg_length = get_msg_length(client_sock)
 
-            msg_length = struct.unpack('!I', raw_msg_length)[0]
-
-            ## Read Full Message
-            msg = b''
-            while len(msg) < msg_length:
-                packet = client_sock.recv(msg_length - len(msg))
-                if not packet: return
-                msg += packet
+            msg = get_full_message(client_sock, msg_length)
 
             ## Save Client Address
             addr = client_sock.getpeername()
             self.clients_connected.append(addr)
 
-            msg = msg.decode('utf-8')
-
             ## Store Bets
             store_bets(get_bets(msg))
 
             ## Resend message
-            client_sock.send("{}\n".format(msg).encode('utf-8'))
+            send_full_message(client_sock, "{}\n".format(msg).encode('utf-8'))
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:
