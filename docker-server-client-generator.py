@@ -54,11 +54,6 @@ services:
     environment:
       - CLI_ID={i+1}
       - CLI_LOG_LEVEL=DEBUG
-      - NOMBRE={env_vars['NOMBRE']}
-      - APELLIDO={env_vars['APELLIDO']}
-      - DOCUMENTO={env_vars['DOCUMENTO']}
-      - NACIMIENTO={env_vars['NACIMIENTO']}
-      - NUMERO={env_vars['NUMERO']}
     networks:
       - testing_net
     depends_on:
