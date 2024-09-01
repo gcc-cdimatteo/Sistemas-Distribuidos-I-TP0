@@ -1,4 +1,3 @@
-# id: 1
 server:
   address: "server:12345"
 loop:

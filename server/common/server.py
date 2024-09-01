@@ -1,6 +1,6 @@
 import socket
 import logging
-
+import signal
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -8,6 +8,18 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self.clients_connected = []
+        self._server_running = True
+
+        signal.signal(signal.SIGTERM, self._handle_exit)
+    
+    def _handle_exit(self, signum, frame):
+        self._server_running = False
+        for client in self.clients_connected:
+            logging.warn(f'connection with address {client} gracefully closed')
+            client.close()
+        self._server_socket.close()
+        logging.warn(f'server gracefully exited')
 
     def run(self):
         """
@@ -17,12 +29,10 @@ class Server:
         communication with a client. After client with communucation
         finishes, servers starts to accept new connections again
         """
-
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
-        while True:
+        while self._server_running:
             client_sock = self.__accept_new_connection()
-            self.__handle_client_connection(client_sock)
+            if client_sock != None:
+                self.__handle_client_connection(client_sock)
 
     def __handle_client_connection(self, client_sock):
         """
@@ -35,6 +45,7 @@ class Server:
             # TODO: Modify the receive to avoid short-reads
             msg = client_sock.recv(1024).rstrip().decode('utf-8')
             addr = client_sock.getpeername()
+            self.clients_connected.append(addr)
             logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
             # TODO: Modify the send to avoid short-writes
             client_sock.send("{}\n".format(msg).encode('utf-8'))
@@ -51,8 +62,12 @@ class Server:
         Then connection created is printed and returned
         """
 
-        # Connection arrived
-        logging.info('action: accept_connections | result: in_progress')
-        c, addr = self._server_socket.accept()
-        logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
-        return c
+        try:
+            # Connection arrived
+            logging.info('action: accept_connections | result: in_progress')
+            c, addr = self._server_socket.accept()
+            logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
+            return c
+        except:
+            logging.warn('socket closed')
+            return None
