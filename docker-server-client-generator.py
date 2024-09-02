@@ -6,9 +6,9 @@ def get_client_log_level() -> str:
     content = file.read()
     match = re.search(r'log:\s*level:\s*"(.*?)"', content)
     if match:
-        return match.group(1)
+      return match.group(1)
     else:
-        return "DEBUG"
+      return "DEBUG"
 
 def get_server_log_level() -> str:
   with open('./server/config.ini', 'r') as file:
@@ -62,6 +62,7 @@ networks:
       config:
         - subnet: 172.25.125.0/24
 """
+  return string_builder
 
 def main():
     args = sys.argv[1:]
