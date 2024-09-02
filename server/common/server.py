@@ -55,6 +55,8 @@ class Server:
             (bets, rejected_bets) = get_bets(msg)
             store_bets(bets)
 
+            logging.debug(f"BETS RECEIVED: {len(bets)}")
+
             if (rejected_bets != 0):
                 logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
                 logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
