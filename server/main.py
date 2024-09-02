@@ -5,9 +5,6 @@ from common.server import Server
 import logging
 import os
 
-from server.common import ANSIFilter
-
-
 def initialize_config():
     """ Parse env variables or config file to find program config params
 
@@ -65,8 +62,6 @@ def initialize_log(logging_level):
         level=logging_level,
         datefmt='%Y-%m-%d %H:%M:%S',
     )
-    logger = logging.getLogger()
-    logger.addFilter(ANSIFilter())
 
 if __name__ == "__main__":
     main()
