@@ -9,7 +9,8 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
-        self.clients_connected = []
+        self.clients_connected = set()
+        self.clients_finished = 0
         self._server_running = True
 
         signal.signal(signal.SIGTERM, self._handle_exit)
@@ -49,21 +50,9 @@ class Server:
 
             ## Save Client Address
             addr = client_sock.getpeername()
-            self.clients_connected.append(addr)
+            self.clients_connected.add(addr)
 
-            ## Store Bets
-            (bets, rejected_bets) = get_bets(msg)
-            store_bets(bets)
-
-            logging.debug(f"BETS RECEIVED: {len(bets)}")
-
-            if (rejected_bets != 0):
-                logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
-                logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
-                send_full_message(client_sock, f"BETS REJECTED: {rejected_bets}\n".encode('utf-8'))
-            else:    
-                send_full_message(client_sock, f"BETS RECEIVED: {len(bets)}\n".encode('utf-8'))
-                logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
+            self.process_message(msg, client_sock)
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:
@@ -86,3 +75,32 @@ class Server:
         except:
             logging.warn('socket closed')
             return None
+    
+    def process_message(self, msg, socket):
+        if (msg == "" or len(msg) == 0): return
+
+        logging.debug(f'message for process: {msg}')
+
+        if len(msg) <= 5: ## "END\n" || "CON|X"
+            msg_splitted = msg.split('|')
+            if len(msg_splitted) == 1 and msg == "END\n": 
+                send_full_message(socket, f"END ACK\n".encode('utf-8'))
+                self.clients_finished += 1
+                logging.debug('action: clients_finished | result: success')
+            if len(msg_splitted) == 2 and "CON" in msg: 
+                logging.debug('action: clients_consult | result: in progress')
+                ## do sth
+        else:
+            ## Store Bets
+            (bets, rejected_bets) = get_bets(msg)
+            store_bets(bets)
+
+            logging.debug(f"BETS RECEIVED: {len(bets)}")
+
+            if (rejected_bets != 0):
+                logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
+                logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
+                send_full_message(socket, f"BETS REJECTED: {rejected_bets}\n".encode('utf-8'))
+            else:    
+                send_full_message(socket, f"BETS RECEIVED: {len(bets)}\n".encode('utf-8'))
+                logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")

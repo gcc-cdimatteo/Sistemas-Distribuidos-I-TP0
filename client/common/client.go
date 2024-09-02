@@ -102,7 +102,7 @@ func (c *Client) StartClientLoop() {
 
 			log.Debugf("action: batch sent | result: success | batch n°: %v", len(batches))
 
-			// c.NotifyEnd()
+			c.NotifyEnd()
 		} else if bet != nil {
 			log.Debugf("action: batch sent | result: in progress | batch n°: %v", len(batches))
 
@@ -235,7 +235,18 @@ func (c *Client) NotifyEnd() {
 		return
 	}
 
+	err = binary.Write(c.conn, binary.BigEndian, uint32(len("END\n")))
+	if err != nil {
+		log.Errorf("action: bet info | result: fail | client_id: %v | error: %v",
+			c.config.ID,
+			err,
+		)
+		return
+	}
+
 	fmt.Fprintf(c.conn, "END\n")
+
+	log.Debugf("END SENT")
 
 	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
 
