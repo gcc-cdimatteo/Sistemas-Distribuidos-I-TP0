@@ -6,7 +6,7 @@ import (
 
 // Bet Entity
 type Bet struct {
-	agencia    int
+	agencia    string
 	nombre     string
 	apellido   string
 	documento  string
@@ -19,5 +19,5 @@ func (b *Bet) Weight() int {
 }
 
 func (b *Bet) Serialize() string {
-	return fmt.Sprintf("%v|%s|%s|%s|%s|%s\n", b.agencia, b.nombre, b.apellido, b.documento, b.nacimiento, b.numero)
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s\n", b.agencia, b.nombre, b.apellido, b.documento, b.nacimiento, b.numero)
 }

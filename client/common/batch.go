@@ -7,15 +7,32 @@ type Batch struct {
 	weight int
 }
 
-func (b *Batch) AppendBet(bet Bet, batchMaxAmount int) *Bet {
-	if b.size+1 > batchMaxAmount || float64(b.weight+bet.Weight())/1024.0 > 8 {
-		log.Debugf("Batch full: [%v] bets, [%v]b of weight", b.size, b.weight)
-		return &bet
-	}
-
+func (b *Batch) AppendBet(bet Bet) {
 	b.bets = append(b.bets, bet)
 	b.size++
 	b.weight += bet.Weight()
+}
 
-	return nil
+func (b *Batch) Serialize() string {
+	var res string
+	for _, bet := range b.bets {
+		res += bet.Serialize()
+	}
+	return res
+}
+
+func (b *Batch) CanHandle(bet Bet, batchMaxAmount int) bool {
+	return !(b.size+1 > batchMaxAmount || float64(b.weight+bet.Weight())/1024.0 > 8)
+}
+
+func (b *Batch) IsFull(batchMaxAmount int) bool {
+	return b.size+1 > batchMaxAmount || float64(b.weight)/1024.0 > 8
+}
+
+func NewBatch() Batch {
+	return Batch{
+		bets:   []Bet{},
+		size:   0,
+		weight: 0,
+	}
 }
