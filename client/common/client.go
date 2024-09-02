@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"time"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/op/go-logging"
 )
@@ -24,10 +24,10 @@ type ClientConfig struct {
 
 // Client Entity that encapsulates how
 type Client struct {
-	config	ClientConfig
-	conn	net.Conn
-	term	chan os.Signal
-	lives	bool
+	config ClientConfig
+	conn   net.Conn
+	term   chan os.Signal
+	lives  bool
 }
 
 // NewClient Initializes a new client receiving the configuration
@@ -35,8 +35,8 @@ type Client struct {
 func NewClient(config ClientConfig) *Client {
 	client := &Client{
 		config: config,
-		term: make(chan os.Signal, 1),
-		lives: true,
+		term:   make(chan os.Signal, 1),
+		lives:  true,
 	}
 
 	signal.Notify(client.term, syscall.SIGTERM)
@@ -68,12 +68,12 @@ func (c *Client) StartClientLoop() {
 	for msgID := 1; msgID <= c.config.LoopAmount && c.lives; msgID++ {
 		// Create the connection to the server in every loop iteration.
 		err := c.createClientSocket()
-		
-		if (!c.lives || c.conn == nil) {
-			log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-			break;
+
+		if !c.lives || c.conn == nil {
+			log.Criticalf("action: connect | result: fail | client_id: %v | error: client no longer lives", c.config.ID)
+			break
 		}
-		
+
 		if err != nil {
 			log.Criticalf("action: connect | result: fail | client_id: %v", c.config.ID)
 			continue
@@ -105,8 +105,10 @@ func (c *Client) StartClientLoop() {
 
 func (c *Client) HandleShutdown() {
 	<-c.term
-	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
+	log.Criticalf("action: handling shutdown | result: in_progress | client_id: %v", c.config.ID)
 	c.lives = false
-	if (c.conn != nil) { c.conn.Close() }
+	if c.conn != nil {
+		c.conn.Close()
+	}
 	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
 }
