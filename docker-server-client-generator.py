@@ -1,23 +1,6 @@
 import sys
 import re
 
-def get_client_log_level() -> str:
-  with open('./client/config.yaml', 'r') as file:
-    content = file.read()
-    match = re.search(r'log:\s*level:\s*"(.*?)"', content)
-    if match:
-      return match.group(1)
-    else:
-      return "DEBUG"
-
-def get_server_log_level() -> str:
-  with open('./server/config.ini', 'r') as file:
-    lines = file.readlines()
-    for line in lines:
-        if line.startswith('LOGGING_LEVEL'):
-            return line.split('=')[1].strip()
-  return "DEBUG"
-
 def get_docker_compose(clients: int) -> str:
   string_builder = ""
 
@@ -30,9 +13,6 @@ services:
     entrypoint: python3 /main.py
     volumes:
       - ./server/config.ini:/config.ini
-    environment:
-      - PYTHONUNBUFFERED=1
-      - LOGGING_LEVEL={get_server_log_level()}
     networks:
       - testing_net
 """
@@ -45,9 +25,6 @@ services:
     entrypoint: /client
     volumes:
       - ./client/config.yaml:/config.yaml
-    environment:
-      - CLI_ID=1
-      - CLI_LOG_LEVEL={get_client_log_level()}
     networks:
       - testing_net
     depends_on:
