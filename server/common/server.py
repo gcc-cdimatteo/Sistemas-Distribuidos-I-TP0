@@ -52,10 +52,16 @@ class Server:
             self.clients_connected.append(addr)
 
             ## Store Bets
-            store_bets(get_bets(msg))
+            (bets, rejected_bets) = get_bets(msg)
+            store_bets(bets)
 
-            ## Resend message
-            send_full_message(client_sock, "{}\n".format(msg).encode('utf-8'))
+            if (rejected_bets != 0):
+                logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
+                logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
+                send_full_message(client_sock, f"BETS REJECTED: {rejected_bets}\n".encode('utf-8'))
+            else:    
+                send_full_message(client_sock, f"BETS RECEIVED: {len(bets)}\n".encode('utf-8'))
+                logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:

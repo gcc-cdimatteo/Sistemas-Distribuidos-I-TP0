@@ -22,11 +22,6 @@ services:
     environment:
       - CLI_ID=1
       - CLI_LOG_LEVEL=DEBUG
-      - NOMBRE=Santiago Lionel
-      - APELLIDO=Lorca
-      - DOCUMENTO=30904465
-      - NACIMIENTO=1999-03-17
-      - NUMERO=7574
     networks:
       - testing_net
     depends_on:
@@ -41,11 +36,6 @@ services:
     environment:
       - CLI_ID=2
       - CLI_LOG_LEVEL=DEBUG
-      - NOMBRE=Maria Jose
-      - APELLIDO=Gomez
-      - DOCUMENTO=27894563
-      - NACIMIENTO=1985-10-25
-      - NUMERO=1234
     networks:
       - testing_net
     depends_on:
@@ -60,11 +50,34 @@ services:
     environment:
       - CLI_ID=3
       - CLI_LOG_LEVEL=DEBUG
-      - NOMBRE=Juan Manuel
-      - APELLIDO=Rodriguez
-      - DOCUMENTO=40789512
-      - NACIMIENTO=2000-01-30
-      - NUMERO=5678
+    networks:
+      - testing_net
+    depends_on:
+      - server
+        
+  client4:
+    container_name: client4
+    image: client:latest
+    entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
+    environment:
+      - CLI_ID=4
+      - CLI_LOG_LEVEL=DEBUG
+    networks:
+      - testing_net
+    depends_on:
+      - server
+        
+  client5:
+    container_name: client5
+    image: client:latest
+    entrypoint: /client
+    volumes:
+      - ./client/config.yaml:/config.yaml
+    environment:
+      - CLI_ID=5
+      - CLI_LOG_LEVEL=DEBUG
     networks:
       - testing_net
     depends_on:

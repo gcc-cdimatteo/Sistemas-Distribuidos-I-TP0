@@ -3,6 +3,7 @@ package common
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/csv"
 	"fmt"
 	"net"
 	"os"
@@ -17,10 +18,12 @@ var log = logging.MustGetLogger("log")
 
 // ClientConfig Configuration used by the client
 type ClientConfig struct {
-	ID            string
-	ServerAddress string
-	LoopAmount    int
-	LoopPeriod    time.Duration
+	ID             string
+	ServerAddress  string
+	LoopAmount     int
+	LoopPeriod     time.Duration
+	BatchMaxAmount int
+	BatchSleep     time.Duration
 }
 
 // Client Entity that encapsulates how
@@ -29,15 +32,6 @@ type Client struct {
 	conn   net.Conn
 	term   chan os.Signal
 	lives  bool
-}
-
-// Bet Entity
-type Bet struct {
-	nombre     string
-	apellido   string
-	documento  string
-	nacimiento string
-	numero     string
 }
 
 // NewClient Initializes a new client receiving the configuration
@@ -74,39 +68,134 @@ func (c *Client) createClientSocket() error {
 func (c *Client) StartClientLoop() {
 	go c.HandleShutdown()
 
-	betData := c.GetBetData()
+	bets, err := c.GetBetData()
 
+	if err != nil {
+		log.Criticalf("action: agency file read | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	var batches []Batch
+
+	batches = append(batches, Batch{
+		bets:   []Bet{},
+		size:   0,
+		weight: 0,
+	})
+
+	for _, bet := range bets {
+		if !c.lives {
+			log.Criticalf("action: batch process | result: fail | client_id: %v | error: Connection Closed", c.config.ID)
+			return
+		}
+
+		log.Debugf("action: bet add to batch process | result: in progress | batch n°: %v", len(batches))
+
+		bet := batches[len(batches)-1].AppendBet(bet, c.config.BatchMaxAmount)
+
+		if bet != nil {
+			log.Debugf("action: batch sent | result: in progress | batch n°: %v", len(batches))
+
+			c.SendBatch(batches[len(batches)-1])
+
+			log.Debugf("action: batch sent | result: success | batch n°: %v", len(batches))
+
+			time.Sleep(c.config.BatchSleep)
+
+			newBatch := Batch{
+				bets:   []Bet{},
+				size:   0,
+				weight: 0,
+			}
+			newBatch.AppendBet(*bet, c.config.BatchMaxAmount)
+			batches = append(batches, newBatch)
+		}
+	}
+
+	log.Infof("action: batch process | result: success | client_id: %v", c.config.ID)
+}
+
+func (c *Client) HandleShutdown() {
+	<-c.term
+	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
+	c.lives = false
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
+}
+
+func (c *Client) GetBetData() ([]Bet, error) {
+	filePath := fmt.Sprintf("/dataset/agency-%v.csv", c.config.ID)
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("could not open file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("could not read CSV data: %v", err)
+	}
+
+	var bets []Bet
+	for _, record := range records {
+		bet := Bet{
+			nombre:     record[0],
+			apellido:   record[1],
+			documento:  record[2],
+			nacimiento: record[3],
+			numero:     record[4],
+		}
+		bets = append(bets, bet)
+	}
+
+	return bets, nil
+}
+
+func (c *Client) SendBatch(batch Batch) {
 	err := c.createClientSocket()
 
 	if !c.lives || c.conn == nil {
 		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
+		c.lives = false
 		return
 	}
 
 	if err != nil {
 		log.Criticalf("action: connect | result: fail | client_id: %v", c.config.ID)
+		c.lives = false
 		return
 	}
 
-	// Build the message
-	message := fmt.Sprintf("%v|%s|%s|%s|%s|%s\n", c.config.ID, betData.nombre, betData.apellido, betData.documento, betData.nacimiento, betData.numero)
+	var message string
+	message_length := 0
+	for _, bet := range batch.bets {
+		// Build Bet Message
+		new_line := fmt.Sprintf("%v|%s|%s|%s|%s|%s\n", c.config.ID, bet.nombre, bet.apellido, bet.documento, bet.nacimiento, bet.numero)
+		message_length += len(new_line)
 
-	// Convert to 4bytes for the protocol avoiding short reads/writes
-	messageLength := len(message)
+		if float64(message_length)/1024.0 > 8 {
 
-	err = binary.Write(c.conn, binary.BigEndian, uint32(messageLength))
+		}
+
+		message += new_line
+	}
+
+	// Send Full Message Length
+	err = binary.Write(c.conn, binary.BigEndian, uint32(len(message)))
 	if err != nil {
-		log.Errorf("action: send_first_message | result: fail | client_id: %v | error: %v",
+		log.Errorf("action: bet info | result: fail | client_id: %v | error: %v",
 			c.config.ID,
 			err,
 		)
 		return
 	}
 
-	// Send the message to the server
+	// Send Full Message
 	fmt.Fprintf(c.conn, message)
 	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
-	c.conn.Close()
 
 	if err != nil {
 		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
@@ -121,43 +210,11 @@ func (c *Client) StartClientLoop() {
 		message_received,
 	)
 
-	if message_received == message {
-		log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s",
-			betData.documento,
-			betData.numero,
-		)
-	} else {
-		log.Warningf("message & message received are not equal: %s vs %s", message, message_received)
+	message_expected := fmt.Sprintf("BETS RECEIVED: %v", len(batch.bets))
+
+	if message_received[:len(message_received)-1] == message_expected {
+		log.Infof("action: apuesta_enviada | result: success | cantidad: %v", len(batch.bets))
 	}
 
-	// Wait a time between sending one message and the next one
-	time.Sleep(c.config.LoopPeriod)
-
-	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-}
-
-func (c *Client) HandleShutdown() {
-	<-c.term
-	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
-	c.lives = false
-	if c.conn != nil {
-		c.conn.Close()
-	}
-	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
-}
-
-func (c *Client) GetBetData() Bet {
-	nombre := os.Getenv("NOMBRE")
-	apellido := os.Getenv("APELLIDO")
-	documento := os.Getenv("DOCUMENTO")
-	nacimiento := os.Getenv("NACIMIENTO")
-	numero := os.Getenv("NUMERO")
-
-	return Bet{
-		nombre:     nombre,
-		apellido:   apellido,
-		documento:  documento,
-		nacimiento: nacimiento,
-		numero:     numero,
-	}
+	c.conn.Close()
 }

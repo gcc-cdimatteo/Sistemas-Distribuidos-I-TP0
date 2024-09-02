@@ -1,17 +1,6 @@
 import sys
 import os
 
-def load_env_file(file_path):
-    env_vars = {}
-    try:
-        with open(file_path, 'r') as f:
-            for line in f:
-                key, value = line.strip().split('=', 1)
-                env_vars[key] = value
-    except FileNotFoundError:
-        raise Exception(f"Env file {file_path} not found")
-    return env_vars
-
 def main():
     args = sys.argv[1:]
 
@@ -43,7 +32,6 @@ services:
     """
     
     for i in range(amount_clients):
-      env_vars = load_env_file(f'client{i+1}.env')
       string_builder += f"""
   client{i+1}:
     container_name: client{i+1}
