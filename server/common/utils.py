@@ -42,32 +42,6 @@ def store_bets(bets: list[Bet]) -> None:
             logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.document} | numero: {bet.number}')
 
 """
-Get Bets from client message
-"""
-def get_bets(msg: str) -> (list[Bet], int):
-    rejected = 0
-    bets = []
-    for bet in msg.split('\n'):
-        values = bet.split('|')
-        if len(values) < 5: break
-        try:
-            bets.append(
-                Bet(
-                    agency = values[0],
-                    first_name = values[1],
-                    last_name = values[2],
-                    document = values[3],
-                    birthdate = values[4],
-                    number = values[5]
-                )
-            )
-        except:
-            rejected += 1
-            logging.warn(f"action: load bet | result: fail | bet: {values}")
-
-    return (bets, rejected)
-
-"""
 Loads the information all the bets in the STORAGE_FILEPATH file.
 Not thread-safe/process-safe.
 """
@@ -80,7 +54,7 @@ def load_bets() -> list[Bet]:
 def get_msg_length(socket) -> int:
     raw_msg_length = socket.recv(4)
     if not raw_msg_length: return 0
-    return struct.unpack('!I', raw_msg_length)[0]
+    return struct.unpack('>I', raw_msg_length)[0]
 
 def get_full_message(socket, msg_length) -> str:
     msg = b''
@@ -92,6 +66,8 @@ def get_full_message(socket, msg_length) -> str:
     return msg.decode('utf-8')
 
 def send_full_message(socket, msg):
+    socket.send(struct.pack('>I', len(msg)))
+
     bytes_sent = 0
     while bytes_sent < len(msg):
         last_sent = socket.send(msg)

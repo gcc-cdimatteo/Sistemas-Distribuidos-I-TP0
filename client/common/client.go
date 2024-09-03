@@ -1,10 +1,10 @@
 package common
 
 import (
-	"bufio"
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -64,6 +64,17 @@ func (c *Client) createClientSocket() error {
 	return nil
 }
 
+// Handle Client Graceful Shutdown when SIGTERM is received
+func (c *Client) HandleShutdown() {
+	<-c.term
+	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
+	c.lives = false
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
+}
+
 // StartClientLoop Send messages to the client until some time threshold is met
 func (c *Client) StartClientLoop() {
 	go c.HandleShutdown()
@@ -75,64 +86,11 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	var batches []Batch
+	log.Debugf("action: bets send | result: in progress | client_id: %v", c.config.ID)
 
-	batches = append(batches, Batch{
-		bets:   []Bet{},
-		size:   0,
-		weight: 0,
-	})
+	c.SendBets(bets)
 
-	log.Debugf("ABOUT TO SEND %v BETS", len(bets))
-
-	for i, bet := range bets {
-		if !c.lives {
-			log.Criticalf("action: batch process | result: fail | client_id: %v | error: Connection Closed", c.config.ID)
-			return
-		}
-
-		log.Debugf("action: bet add to batch process | result: in progress | batch n°: %v", len(batches))
-
-		bet := batches[len(batches)-1].AppendBet(bet, c.config.BatchMaxAmount)
-
-		if bet == nil && i == len(bets)-1 {
-			log.Debugf("action: last batch sent | result: in progress | batch n°: %v", len(batches))
-
-			c.SendBatch(batches[len(batches)-1])
-
-			log.Debugf("action: batch sent | result: success | batch n°: %v", len(batches))
-
-			// c.NotifyEnd()
-		} else if bet != nil {
-			log.Debugf("action: batch sent | result: in progress | batch n°: %v", len(batches))
-
-			c.SendBatch(batches[len(batches)-1])
-
-			log.Debugf("action: batch sent | result: success | batch n°: %v", len(batches))
-
-			time.Sleep(c.config.BatchSleep)
-
-			newBatch := Batch{
-				bets:   []Bet{},
-				size:   0,
-				weight: 0,
-			}
-			newBatch.AppendBet(*bet, c.config.BatchMaxAmount)
-			batches = append(batches, newBatch)
-		}
-	}
-
-	log.Infof("action: batch process | result: success | client_id: %v", c.config.ID)
-}
-
-func (c *Client) HandleShutdown() {
-	<-c.term
-	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
-	c.lives = false
-	if c.conn != nil {
-		c.conn.Close()
-	}
-	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
+	log.Debugf("action: bets send | result: success | client_id: %v", c.config.ID)
 }
 
 func (c *Client) GetBetData() ([]Bet, error) {
@@ -152,6 +110,7 @@ func (c *Client) GetBetData() ([]Bet, error) {
 	var bets []Bet
 	for _, record := range records {
 		bet := Bet{
+			agencia:    c.config.ID,
 			nombre:     record[0],
 			apellido:   record[1],
 			documento:  record[2],
@@ -164,93 +123,131 @@ func (c *Client) GetBetData() ([]Bet, error) {
 	return bets, nil
 }
 
-func (c *Client) SendBatch(batch Batch) {
+func (c *Client) SendBets(bets []Bet) error {
+	var batches []Batch
+
+	batches = append(batches, NewBatch())
+	lastBatch := batches[len(batches)-1]
+
+	for i, bet := range bets {
+		if !c.lives {
+			log.Criticalf("action: batch process | result: fail | client_id: %v | error: connection closed", c.config.ID)
+			return fmt.Errorf("Client no longer lives")
+		}
+
+		if !lastBatch.CanHandle(bet, c.config.BatchMaxAmount) {
+			c.SendBatch(lastBatch, len(batches))
+			time.Sleep(c.config.BatchSleep)
+
+			batches = append(batches, NewBatch())
+			lastBatch = batches[len(batches)-1]
+		}
+
+		lastBatch.AppendBet(bet)
+
+		if i == len(bets)-1 {
+			c.SendBatch(lastBatch, len(batches))
+			time.Sleep(c.config.BatchSleep)
+		}
+	}
+
+	return fmt.Errorf("final message sent with error")
+}
+
+func (c *Client) SendBatch(batch Batch, batchNumber int) {
+	log.Debugf("action: batch send | result: in progress | batch n°: %v", batchNumber)
+
+	message := batch.Serialize()
+
+	messageReceived, err := c.Send(message)
+
+	if err != nil {
+		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+			c.config.ID,
+			err,
+		)
+		return
+	}
+
+	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
+		c.config.ID,
+		messageReceived,
+	)
+
+	if messageReceived == "ACK\n" {
+		log.Debugf("action: batch send | result: success | batch n°: %v", batchNumber)
+	} else {
+		log.Warningf("action: batch send | result: fail | batch n°: %v | error: %s", batchNumber, messageReceived)
+	}
+}
+
+func (c *Client) Send(message string) (string, error) {
+	// Open Connection
 	err := c.createClientSocket()
 
 	if !c.lives || c.conn == nil {
 		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-		c.lives = false
-		return
+		return "", fmt.Errorf("Client no longer lives")
 	}
 
 	if err != nil {
-		log.Criticalf("action: connect | result: fail | client_id: %v", c.config.ID)
-		c.lives = false
-		return
+		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return "", err
 	}
 
-	var message string
-	for _, bet := range batch.bets {
-		message += bet.Serialize()
-	}
-
-	// Send Full Message Length
-	err = binary.Write(c.conn, binary.BigEndian, uint32(batch.weight))
+	// First Message - Length
+	err = binary.Write(c.conn, binary.BigEndian, uint32(len(message)))
 	if err != nil {
 		log.Errorf("action: bet info | result: fail | client_id: %v | error: %v",
 			c.config.ID,
 			err,
 		)
-		return
+		return "", err
 	}
 
-	// Send Full Message
+	// Second Message - Full Message
 	fmt.Fprintf(c.conn, message)
-	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
+
+	// Response
+	messageReceived, err := c.Recv()
+
+	// Close Connection
+	c.conn.Close()
 
 	if err != nil {
 		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
 			c.config.ID,
 			err,
 		)
-		return
+		return "", err
 	}
 
 	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
 		c.config.ID,
-		message_received,
+		messageReceived,
 	)
 
-	message_expected := fmt.Sprintf("BETS RECEIVED: %v", len(batch.bets))
-
-	if message_received[:len(message_received)-1] == message_expected {
-		log.Infof("action: apuesta_enviada | result: success | cantidad: %v", len(batch.bets))
-	}
-
-	c.conn.Close()
+	return messageReceived, nil
 }
 
-func (c *Client) NotifyEnd() {
-	err := c.createClientSocket()
+func (c *Client) Recv() (string, error) {
+	lengthBuffer := make([]byte, 4)
 
-	if !c.lives || c.conn == nil {
-		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-		c.lives = false
-		return
-	}
-
+	// Read First 4 bytes
+	_, err := io.ReadFull(c.conn, lengthBuffer)
 	if err != nil {
-		log.Criticalf("action: connect | result: fail | client_id: %v", c.config.ID)
-		c.lives = false
-		return
+		return "", err
 	}
 
-	fmt.Fprintf(c.conn, "END\n")
+	messageLength := int(lengthBuffer[0])<<24 | int(lengthBuffer[1])<<16 | int(lengthBuffer[2])<<8 | int(lengthBuffer[3])
 
-	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
+	message := make([]byte, messageLength)
 
+	// Get Full Message
+	_, err = io.ReadFull(c.conn, message)
 	if err != nil {
-		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		return
+		return "", err
 	}
 
-	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-		c.config.ID,
-		message_received,
-	)
-
-	c.conn.Close()
+	return string(message), nil
 }
