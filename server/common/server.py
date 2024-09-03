@@ -1,7 +1,8 @@
 import socket
 import logging
 import signal
-from common.utils import store_bets, get_bets, get_msg_length, get_full_message, send_full_message
+from common.message import Message
+from common.utils import Bet, load_bets, has_won, store_bets, get_msg_length, get_full_message, send_full_message
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -9,13 +10,17 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
-        self.clients_connected = []
-        self._server_running = True
+        self.server_running = True
+        
+        self.clients_connected = set()
+        self.clients_finished = 0
+
+        self.bets = None
 
         signal.signal(signal.SIGTERM, self._handle_exit)
     
     def _handle_exit(self, signum, frame):
-        self._server_running = False
+        self.server_running = False
         for client in self.clients_connected:
             logging.warn(f'connection with address {client} gracefully closed')
             client.close()
@@ -30,7 +35,7 @@ class Server:
         communication with a client. After client with communucation
         finishes, servers starts to accept new connections again
         """
-        while self._server_running:
+        while self.server_running:
             client_sock = self.__accept_new_connection()
             if client_sock != None:
                 self.__handle_client_connection(client_sock)
@@ -49,13 +54,9 @@ class Server:
 
             ## Save Client Address
             addr = client_sock.getpeername()
-            self.clients_connected.append(addr)
+            self.clients_connected.add(addr[0])
 
-            ## Store Bets
-            store_bets(get_bets(msg))
-
-            ## Resend message
-            send_full_message(client_sock, "{}\n".format(msg).encode('utf-8'))
+            self.process_message(Message(msg), client_sock)
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:
@@ -68,7 +69,6 @@ class Server:
         Function blocks until a connection to a client is made.
         Then connection created is printed and returned
         """
-
         try:
             # Connection arrived
             logging.info('action: accept_connections | result: in_progress')
@@ -78,3 +78,27 @@ class Server:
         except:
             logging.warn('socket closed')
             return None
+    
+    def process_message(self, msg: Message, socket):
+        if msg.empty(): return
+
+        if msg.is_BET(): 
+            (received, rejected) = self.process_bets(msg)
+            if rejected != 0: send_full_message(socket, f"REJECTED: {rejected}\n".encode('utf-8'))
+            else:
+                send_full_message(socket, f"{msg.content}\n".encode('utf-8'))
+        else:
+            logging.error("action: receive_message | result: fail | error: message couldnt be parsed")
+    
+    def process_bets(self, msg: Message) -> tuple[int, int]:
+        (bets, rejected_bets) = msg.get_bets()
+
+        if (rejected_bets != 0):
+            logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
+            logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
+        else:    
+            logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
+        
+        store_bets(bets)
+
+        return (len(bets), rejected_bets)

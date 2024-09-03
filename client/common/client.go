@@ -1,9 +1,9 @@
 package common
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -29,15 +29,6 @@ type Client struct {
 	conn   net.Conn
 	term   chan os.Signal
 	lives  bool
-}
-
-// Bet Entity
-type Bet struct {
-	nombre     string
-	apellido   string
-	documento  string
-	nacimiento string
-	numero     string
 }
 
 // NewClient Initializes a new client receiving the configuration
@@ -70,72 +61,7 @@ func (c *Client) createClientSocket() error {
 	return nil
 }
 
-// StartClientLoop Send messages to the client until some time threshold is met
-func (c *Client) StartClientLoop() {
-	go c.HandleShutdown()
-
-	betData := c.GetBetData()
-
-	err := c.createClientSocket()
-
-	if !c.lives || c.conn == nil {
-		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-		return
-	}
-
-	if err != nil {
-		log.Criticalf("action: connect | result: fail | client_id: %v", c.config.ID)
-		return
-	}
-
-	// Build the message
-	message := fmt.Sprintf("%v|%s|%s|%s|%s|%s\n", c.config.ID, betData.nombre, betData.apellido, betData.documento, betData.nacimiento, betData.numero)
-
-	// Convert to 4bytes for the protocol avoiding short reads/writes
-	messageLength := len(message)
-
-	err = binary.Write(c.conn, binary.BigEndian, uint32(messageLength))
-	if err != nil {
-		log.Errorf("action: send_first_message | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		return
-	}
-
-	// Send the message to the server
-	fmt.Fprintf(c.conn, message)
-	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
-	c.conn.Close()
-
-	if err != nil {
-		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		return
-	}
-
-	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-		c.config.ID,
-		message_received,
-	)
-
-	if message_received == message {
-		log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s",
-			betData.documento,
-			betData.numero,
-		)
-	} else {
-		log.Warningf("message & message received are not equal: %s vs %s", message, message_received)
-	}
-
-	// Wait a time between sending one message and the next one
-	time.Sleep(c.config.LoopPeriod)
-
-	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-}
-
+// Handle Client Graceful Shutdown when SIGTERM is received
 func (c *Client) HandleShutdown() {
 	<-c.term
 	log.Criticalf("action: handling shutdown | result: in progress | client_id: %v", c.config.ID)
@@ -146,18 +72,139 @@ func (c *Client) HandleShutdown() {
 	log.Criticalf("action: client shutdown | result: success | client_id: %v", c.config.ID)
 }
 
-func (c *Client) GetBetData() Bet {
+// StartClientLoop Send messages to the client until some time threshold is met
+func (c *Client) StartClientLoop() {
+	go c.HandleShutdown()
+
+	bets, err := c.GetBetData()
+
+	if err != nil {
+		log.Criticalf("action: agency file read | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return
+	}
+
+	c.SendBets(bets)
+}
+
+func (c *Client) GetBetData() ([]Bet, error) {
 	nombre := os.Getenv("NOMBRE")
 	apellido := os.Getenv("APELLIDO")
 	documento := os.Getenv("DOCUMENTO")
 	nacimiento := os.Getenv("NACIMIENTO")
 	numero := os.Getenv("NUMERO")
 
-	return Bet{
+	var bets []Bet
+	bets = append(bets, Bet{
+		agencia:    c.config.ID,
 		nombre:     nombre,
 		apellido:   apellido,
 		documento:  documento,
 		nacimiento: nacimiento,
 		numero:     numero,
+	})
+
+	log.Debugf("action: bet created | result: success | bet: %v", bets[0])
+
+	return bets, nil
+}
+
+func (c *Client) SendBets(bets []Bet) error {
+	for _, bet := range bets {
+		if !c.lives {
+			log.Criticalf("action: batch process | result: fail | client_id: %v | error: connection closed", c.config.ID)
+			return fmt.Errorf("Client no longer lives")
+		}
+
+		message_received, err := c.Send(bet.Serialize())
+
+		if message_received == bet.Serialize() {
+			log.Infof("action: apuesta_enviada | result: success | dni: %s | numero: %s",
+				bet.documento,
+				bet.numero,
+			)
+		} else {
+			log.Debugf("message_sent: [%s] vs message_received: [%s]", bet.Serialize(), message_received)
+		}
+
+		if err != nil {
+			log.Infof("action: apuesta_enviada | result: fail | dni: %s | numero: %s | error: %s", bet.documento, bet.numero, err)
+		}
+
+		time.Sleep(c.config.LoopPeriod)
 	}
+
+	log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+	return nil
+}
+
+func (c *Client) Send(message string) (string, error) {
+	// Open Connection
+	err := c.createClientSocket()
+
+	if !c.lives || c.conn == nil {
+		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
+		return "", fmt.Errorf("Client no longer lives")
+	}
+
+	if err != nil {
+		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return "", err
+	}
+
+	// First Message - Length
+	err = binary.Write(c.conn, binary.BigEndian, uint32(len(message)))
+	if err != nil {
+		log.Errorf("action: bet info | result: fail | client_id: %v | error: %v",
+			c.config.ID,
+			err,
+		)
+		return "", err
+	}
+
+	// Second Message - Full Message
+	fmt.Fprintf(c.conn, message)
+
+	// Response
+	messageReceived, err := c.Recv()
+
+	// Close Connection
+	c.conn.Close()
+
+	if err != nil {
+		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+			c.config.ID,
+			err,
+		)
+		return "", err
+	}
+
+	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
+		c.config.ID,
+		messageReceived,
+	)
+
+	return messageReceived, nil
+}
+
+func (c *Client) Recv() (string, error) {
+	lengthBuffer := make([]byte, 4)
+
+	// Read First 4 bytes
+	_, err := io.ReadFull(c.conn, lengthBuffer)
+	if err != nil {
+		return "", err
+	}
+
+	messageLength := int(lengthBuffer[0])<<24 | int(lengthBuffer[1])<<16 | int(lengthBuffer[2])<<8 | int(lengthBuffer[3])
+
+	message := make([]byte, messageLength)
+
+	// Get Full Message
+	_, err = io.ReadFull(c.conn, message)
+	if err != nil {
+		return "", err
+	}
+
+	return string(message), nil
 }
