@@ -6,19 +6,10 @@ class Message:
         self.type = None
 
         messages = self.content.split('\n')
-        if messages[0] == "END": self.type = "END"
-        elif messages[0] == "WIN": self.type = "WIN"
-        elif "CON" in messages[0]: self.type = "CON"
-        elif '|' in messages[0]: self.type = "BET" ## there can be bets, we will be sure after the processing
+        if '|' in messages[0]: self.type = "BET" ## there can be bets, we will be sure after the processing
 
     def empty(self):
         return self.content == "" or len(self.content) == 0
-
-    def is_END(self): return self.type == "END"
-
-    def is_WIN(self): return self.type == "WIN"
-
-    def is_CON(self): return self.type == "CON"
 
     def is_BET(self): return self.type == "BET"
 
