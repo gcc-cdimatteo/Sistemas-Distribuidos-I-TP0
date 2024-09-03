@@ -1,10 +1,10 @@
 package common
 
 import (
-	"bufio"
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -189,9 +189,26 @@ func (c *Client) SendBatch(batch Batch, batchNumber int) {
 
 	message := batch.Serialize()
 
-	c.Send(message)
+	messageReceived, err := c.Send(message)
 
-	log.Debugf("action: batch send | result: success | batch n°: %v", batchNumber)
+	if err != nil {
+		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+			c.config.ID,
+			err,
+		)
+		return
+	}
+
+	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
+		c.config.ID,
+		messageReceived,
+	)
+
+	if messageReceived == "ACK\n" {
+		log.Debugf("action: batch send | result: success | batch n°: %v", batchNumber)
+	} else {
+		log.Warningf("action: batch send | result: fail | batch n°: %v | error: %s", batchNumber, messageReceived)
+	}
 }
 
 func (c *Client) Send(message string) (string, error) {
@@ -222,7 +239,7 @@ func (c *Client) Send(message string) (string, error) {
 	fmt.Fprintf(c.conn, message)
 
 	// Response
-	message_received, err := bufio.NewReader(c.conn).ReadString('\n')
+	messageReceived, err := c.Recv()
 
 	// Close Connection
 	c.conn.Close()
@@ -237,8 +254,30 @@ func (c *Client) Send(message string) (string, error) {
 
 	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
 		c.config.ID,
-		message_received,
+		messageReceived,
 	)
 
-	return message_received, nil
+	return messageReceived, nil
+}
+
+func (c *Client) Recv() (string, error) {
+	lengthBuffer := make([]byte, 4)
+
+	// Read First 4 bytes
+	_, err := io.ReadFull(c.conn, lengthBuffer)
+	if err != nil {
+		return "", err
+	}
+
+	messageLength := int(lengthBuffer[0])<<24 | int(lengthBuffer[1])<<16 | int(lengthBuffer[2])<<8 | int(lengthBuffer[3])
+
+	message := make([]byte, messageLength)
+
+	// Get Full Message
+	_, err = io.ReadFull(c.conn, message)
+	if err != nil {
+		return "", err
+	}
+
+	return string(message), nil
 }

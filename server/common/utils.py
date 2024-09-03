@@ -54,7 +54,7 @@ def load_bets() -> list[Bet]:
 def get_msg_length(socket) -> int:
     raw_msg_length = socket.recv(4)
     if not raw_msg_length: return 0
-    return struct.unpack('!I', raw_msg_length)[0]
+    return struct.unpack('>I', raw_msg_length)[0]
 
 def get_full_message(socket, msg_length) -> str:
     msg = b''
@@ -66,6 +66,8 @@ def get_full_message(socket, msg_length) -> str:
     return msg.decode('utf-8')
 
 def send_full_message(socket, msg):
+    socket.send(struct.pack('>I', len(msg)))
+
     bytes_sent = 0
     while bytes_sent < len(msg):
         last_sent = socket.send(msg)

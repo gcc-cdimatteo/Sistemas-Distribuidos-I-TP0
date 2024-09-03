@@ -82,8 +82,6 @@ class Server:
     def process_message(self, msg: Message, socket):
         if msg.empty(): return
 
-        msg.deserialize()
-
         if msg.is_END():
             self.clients_finished += 1
             send_full_message(socket, f"END ACK\n".encode('utf-8'))
@@ -115,7 +113,7 @@ class Server:
         elif msg.is_BET(): 
             (received, rejected) = self.process_bets(msg)
             if rejected != 0: send_full_message(socket, f"REJECTED: {rejected}\n".encode('utf-8'))
-            else: send_full_message(socket, f"RECEIVED: {received}\n".encode('utf-8'))
+            else: send_full_message(socket, f"ACK\n".encode('utf-8'))
         else:
             logging.error("action: receive_message | result: fail | error: message couldnt be parsed")
     
@@ -126,7 +124,7 @@ class Server:
             logging.info(f"action: apuesta_recibida | result: fail | cantidad: {len(bets)}")
             logging.warn(f"action: apuestas rechazadas | result: fail | cantidad: {rejected_bets}")
         else:    
-            logging.info(f"action: apuesta_recibida | result: success | detail: {len(bets)}")
+            logging.info(f"action: apuesta_recibida | result: success | cantidad: {len(bets)}")
         
         store_bets(bets)
 
