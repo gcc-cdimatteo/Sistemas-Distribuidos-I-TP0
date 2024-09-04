@@ -7,4 +7,4 @@ log:
   level: "INFO"
 batch:
   maxAmount: 300
-  sleep: "0s"
+  sleep: "3s"

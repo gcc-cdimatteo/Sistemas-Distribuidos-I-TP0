@@ -61,6 +61,7 @@ func (c *Client) createClientSocket() error {
 			c.config.ID,
 			err,
 		)
+		c.lives = false
 	}
 	c.conn = conn
 	return nil
@@ -90,7 +91,12 @@ func (c *Client) StartClientLoop() {
 
 	log.Debugf("action: bets send | result: in progress | client_id: %v", c.config.ID)
 
-	c.SendBets(bets)
+	err = c.SendBets(bets)
+
+	if err != nil {
+		log.Debugf("action: bets send | result: fail | client_id: %v", c.config.ID)
+		return
+	}
 
 	log.Debugf("action: bets send | result: success | client_id: %v", c.config.ID)
 
@@ -161,7 +167,7 @@ func (c *Client) SendBets(bets []Bet) error {
 	for i, bet := range bets {
 		if !c.lives {
 			log.Criticalf("action: batch process | result: fail | client_id: %v | error: connection closed", c.config.ID)
-			return fmt.Errorf("Client no longer lives")
+			return fmt.Errorf("client no longer lives")
 		}
 
 		if !lastBatch.CanHandle(bet, c.config.BatchMaxAmount) {
@@ -216,12 +222,13 @@ func (c *Client) Send(message string) (string, error) {
 	err := c.createClientSocket()
 
 	if !c.lives || c.conn == nil {
-		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-		return "", fmt.Errorf("Client no longer lives")
+		log.Criticalf("server socket closed or client no longer lives")
+		return "", fmt.Errorf("server socket closed or client no longer lives")
 	}
 
 	if err != nil {
 		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		c.lives = false
 		return "", err
 	}
 
