@@ -94,7 +94,7 @@ func (c *Client) StartClientLoop() {
 	err = c.SendBets(bets)
 
 	if err != nil {
-		log.Debugf("action: bets send | result: fail | client_id: %v", c.config.ID)
+		log.Criticalf("action: bets send | result: fail | client_id: %v", c.config.ID)
 		return
 	}
 
