@@ -13,7 +13,7 @@ class Server:
         self._server_socket.listen(listen_backlog)
         self._server_running = True
 
-        self.clients = set()
+        self.clients: set[Client] = set()
         
         self.bets = None
 
@@ -48,9 +48,7 @@ class Server:
         client socket will also be closed
         """
         try:
-            client = Client(client_sock)
-
-            self.clients.add(client)
+            client = self.add_client(client_sock)
 
             self.process_message(client)
         except OSError as e:
@@ -74,6 +72,17 @@ class Server:
         except:
             logging.warn('socket closed')
             return None
+        
+    def add_client(self, socket) -> Client:
+        ip = socket.getpeername()[0]
+        for c in self.clients:
+            if c.ip == ip:
+                c.set_new_socket(socket)
+                return c
+        
+        client = Client(socket)
+        self.clients.add(client)
+        return client
     
     def process_message(self, client: Client):
         msg = client.recv()

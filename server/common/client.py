@@ -6,8 +6,13 @@ from common.message import Message
 class Client:
     def __init__(self, socket):
         self.socket = socket
+        self.ip = socket.getpeername()[0]
 
     def close(self): self.socket.close()
+
+    def set_new_socket(self, socket): 
+        self.socket = socket
+        self.ip = socket.getpeername()[0]
 
     def recv(self) -> Message:
         raw_content_length = self.socket.recv(4)
