@@ -84,7 +84,12 @@ func (c *Client) StartClientLoop() {
 		return
 	}
 
-	c.SendBets(bets)
+	err = c.SendBets(bets)
+
+	if err != nil {
+		log.Criticalf("action: bets send | result: fail | client_id: %v", c.config.ID)
+		return
+	}
 }
 
 func (c *Client) GetBetData() ([]Bet, error) {
@@ -113,7 +118,7 @@ func (c *Client) SendBets(bets []Bet) error {
 	for _, bet := range bets {
 		if !c.lives {
 			log.Criticalf("action: batch process | result: fail | client_id: %v | error: connection closed", c.config.ID)
-			return fmt.Errorf("Client no longer lives")
+			return fmt.Errorf("client no longer lives")
 		}
 
 		message_received, err := c.Send(bet.Serialize())
@@ -143,8 +148,8 @@ func (c *Client) Send(message string) (string, error) {
 	err := c.createClientSocket()
 
 	if !c.lives || c.conn == nil {
-		log.Criticalf("action: client no longer lives | client_id: %v", c.config.ID)
-		return "", fmt.Errorf("Client no longer lives")
+		log.Criticalf("server socket closed or client no longer lives")
+		return "", fmt.Errorf("server socket closed or client no longer lives")
 	}
 
 	if err != nil {
