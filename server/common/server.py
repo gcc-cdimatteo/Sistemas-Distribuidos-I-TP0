@@ -2,7 +2,8 @@ import socket
 import logging
 import signal
 from common.message import Message
-from common.utils import Bet, load_bets, has_won, store_bets, get_msg_length, get_full_message, send_full_message
+from common.client import Client
+from common.utils import store_bets
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -10,17 +11,16 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
-        self.server_running = True
-        
-        self.clients_connected = set()
-        self.clients_finished = 0
+        self._server_running = True
 
+        self.clients = set()
+        
         self.bets = None
 
         signal.signal(signal.SIGTERM, self._handle_exit)
     
     def _handle_exit(self, signum, frame):
-        self.server_running = False
+        self._server_running = False
         for client in self.clients_connected:
             logging.warn(f'connection with address {client} gracefully closed')
             client.close()
@@ -35,7 +35,7 @@ class Server:
         communication with a client. After client with communucation
         finishes, servers starts to accept new connections again
         """
-        while self.server_running:
+        while self._server_running:
             client_sock = self.__accept_new_connection()
             if client_sock != None:
                 self.__handle_client_connection(client_sock)
@@ -48,19 +48,15 @@ class Server:
         client socket will also be closed
         """
         try:
-            msg_length = get_msg_length(client_sock)
+            client = Client(client_sock)
 
-            msg = get_full_message(client_sock, msg_length)
+            self.clients.add(client)
 
-            ## Save Client Address
-            addr = client_sock.getpeername()
-            self.clients_connected.add(addr[0])
-
-            self.process_message(Message(msg), client_sock)
+            self.process_message(client)
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:
-            client_sock.close()
+            client.close()
 
     def __accept_new_connection(self):
         """
@@ -79,14 +75,17 @@ class Server:
             logging.warn('socket closed')
             return None
     
-    def process_message(self, msg: Message, socket):
+    def process_message(self, client: Client):
+        msg = client.recv()
+
         if msg.empty(): return
 
         if msg.is_BET(): 
-            (received, rejected) = self.process_bets(msg)
-            if rejected != 0: send_full_message(socket, f"REJECTED: {rejected}\n".encode('utf-8'))
+            (_, rejected) = self.process_bets(msg)
+            if rejected != 0: 
+                client.send(f"REJECTED {rejected}\n")
             else:
-                send_full_message(socket, f"{msg.content}\n".encode('utf-8'))
+                client.send(msg.content)
         else:
             logging.error("action: receive_message | result: fail | error: message couldnt be parsed")
     
