@@ -1,8 +1,6 @@
 import csv
 import datetime
-import time
 import logging
-import struct
 
 """ Bets storage location. """
 STORAGE_FILEPATH = "bets.csv"
@@ -50,28 +48,3 @@ def load_bets() -> list[Bet]:
         reader = csv.reader(file, quoting=csv.QUOTE_MINIMAL)
         for row in reader:
             yield Bet(row[0], row[1], row[2], row[3], row[4], row[5])
-
-def get_msg_length(socket) -> int:
-    raw_msg_length = socket.recv(4)
-    if not raw_msg_length: return 0
-    return struct.unpack('>I', raw_msg_length)[0]
-
-def get_full_message(socket, msg_length) -> str:
-    msg = b''
-    while len(msg) < msg_length:
-        packet = socket.recv(msg_length - len(msg))
-        if not packet: return
-        msg += packet
-    
-    return msg.decode('utf-8')
-
-def send_full_message(socket, msg):
-    socket.send(struct.pack('>I', len(msg)))
-
-    bytes_sent = 0
-    while bytes_sent < len(msg):
-        last_sent = socket.send(msg)
-        if last_sent == 0: 
-            logging.info(f'action: send_full_message | result: fail | error: socket closed')
-            return
-        bytes_sent += last_sent
