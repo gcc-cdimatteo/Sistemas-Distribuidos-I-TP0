@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/csv"
 	"fmt"
@@ -182,7 +183,6 @@ func (c *Client) SendBatch(batch Batch, batchNumber int) {
 }
 
 func (c *Client) Send(message string) (string, error) {
-	// Open Connection
 	err := c.createClientSocket()
 
 	if !c.lives || c.conn == nil {
@@ -195,55 +195,60 @@ func (c *Client) Send(message string) (string, error) {
 		return "", err
 	}
 
-	// First Message - Length
-	err = binary.Write(c.conn, binary.BigEndian, uint32(len(message)))
+	messageBytes := []byte(message)
+
+	buffer := new(bytes.Buffer)
+
+	// Message's length
+	err = binary.Write(buffer, binary.BigEndian, uint32(len(messageBytes)))
 	if err != nil {
-		log.Errorf("action: bet info | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
+		log.Errorf("action: write_length | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return "", err
 	}
 
-	// Second Message - Full Message
-	fmt.Fprintf(c.conn, message)
+	// Message in Bytes
+	err = binary.Write(buffer, binary.BigEndian, messageBytes)
+	if err != nil {
+		log.Errorf("action: write_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return "", err
+	}
 
-	// Response
+	// Send the complete binary message
+	_, err = c.conn.Write(buffer.Bytes())
+	if err != nil {
+		log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		return "", err
+	}
+
+	// Get Response
 	messageReceived, err := c.Recv()
 
-	// Close Connection
 	c.conn.Close()
 
 	if err != nil {
-		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
+		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return "", err
 	}
 
-	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
-		c.config.ID,
-		messageReceived,
-	)
+	log.Infof("action: receive_message | result: success | client_id: %v | msg: %v", c.config.ID, messageReceived)
 
 	return messageReceived, nil
 }
 
 func (c *Client) Recv() (string, error) {
+	// Get the first 4 bytes for Message's Length
 	lengthBuffer := make([]byte, 4)
 
-	// Read First 4 bytes
 	_, err := io.ReadFull(c.conn, lengthBuffer)
 	if err != nil {
 		return "", err
 	}
 
-	messageLength := int(lengthBuffer[0])<<24 | int(lengthBuffer[1])<<16 | int(lengthBuffer[2])<<8 | int(lengthBuffer[3])
+	messageLength := int(binary.BigEndian.Uint32(lengthBuffer))
 
+	// Receive the Full Message
 	message := make([]byte, messageLength)
 
-	// Get Full Message
 	_, err = io.ReadFull(c.conn, message)
 	if err != nil {
 		return "", err

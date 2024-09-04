@@ -5,12 +5,12 @@ class Message:
         self.content = content
         self.type = None
 
-        messages = self.content.split('\n')
+        messages = content.split('\n')
         if '|' in messages[0]: self.type = "BET" ## there can be bets, we will be sure after the processing
 
     def empty(self):
         return self.content == "" or len(self.content) == 0
-
+    
     def is_BET(self): return self.type == "BET"
 
     def get_bets(self) -> tuple[list[Bet], int]:
