@@ -13,13 +13,9 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self._server_running = True
 
         manager = Manager()
-
-        ## Server Management
-        self.server_space = manager.Namespace()
-        self.server_space.server_running = True
-        self.server_space_lock = manager.Lock()
 
         ## Clients Management
         self.winners_barrier = manager.Barrier(Server.MAX_CLIENTS) ## ONLY WORKS FOR 5 AGENCIES - TODO: fix
@@ -31,12 +27,10 @@ class Server:
         self.bets_lock = manager.Lock()
         self.bets_file_lock = manager.Lock()
 
-        signal.signal(signal.SIGTERM, self._handle_exit)
+        signal.signal(signal.SIGTERM, self.handle_exit)
     
-    def _handle_exit(self, signum, frame):
-        self.server_space_lock.acquire()
-        self.server_space.server_running = False
-        self.server_space_lock.release()
+    def handle_exit(self, signum, frame):
+        self._server_running = False
         logging.debug(f"_handle_exit - try to aquire clients connected lock")
         self.clients_connected_lock.acquire()
         logging.debug(f"_handle_exit - aquire clients connected lock")
@@ -60,18 +54,12 @@ class Server:
 
         processes: list[Process] = []
 
-        self.server_space_lock.acquire()
-        server_status = self.server_space.server_running
-        self.server_space_lock.release()
-        while server_status:
+        while self._server_running:
             logging.info(f"action: start server | result: running")
             client_sock = self.__accept_new_connection()
             if client_sock != None:
                 processes.append(Process(target=self.__handle_client_connection, args=(client_sock,)))
                 processes[-1].start()
-                self.server_space_lock.acquire()
-                server_status = self.server_space.server_running
-                self.server_space_lock.release()
 
         logging.info(f"action: start server | result: stopped")
 
@@ -141,31 +129,7 @@ class Server:
 
     def finish_client(self, client: Client):
         client.finish()
-
         client.close()
-
-        logging.debug(f"finish_client - try to aquire clients connected lock")
-        self.clients_connected_lock.acquire()
-        logging.debug(f"finish_client - aquire clients connected lock")
-
-        idx = 0
-        for c in self.clients_connected:
-            if c.getpeername()[0] == client.ip: 
-                self.clients_connected.pop(idx)
-                break
-            
-            idx += 1
-        logging.debug(f"finish_client - remove socket")
-
-        if len(self.clients_connected) == 0: 
-            self.server_space_lock.acquire()
-            self.server_space.server_running = False ## shutdown server on last client
-            self.server_space_lock.release()
-
-        logging.debug(f"finish_client - len(self.clients_connected) = {len(self.clients_connected)}")
-
-        self.clients_connected_lock.release()
-        logging.debug(f"finish_client - release clients connected lock")
     
     def process_message(self, client: Client):
         msg = client.recv()
