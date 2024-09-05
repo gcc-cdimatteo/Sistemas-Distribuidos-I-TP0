@@ -2,20 +2,27 @@ import struct
 import logging
 
 from common.message import Message
+from common.utils import Bet
 
 class Client:
     def __init__(self, socket):
+        self.id = 0
         self.socket = socket
         self.ip = socket.getpeername()[0]
+        self.winners = None
         self.finished = False
 
     def close(self): self.socket.close()
 
     def finish(self): self.finished = True
 
-    def set_new_socket(self, socket): 
-        self.socket = socket
-        self.ip = socket.getpeername()[0]
+    def set_id(self, id): 
+        if self.id == 0: 
+            logging.debug(f'set id for client {self}')
+            self.id = id
+    
+    def set_winners(self, winners: list[Bet]): 
+        self.winners = winners
 
     def recv(self) -> Message:
         raw_content_length = self.socket.recv(4)
@@ -46,3 +53,6 @@ class Client:
                 logging.info(f'action: send_full_message | result: fail | error: socket closed')
                 return
             bytes_sent += last_sent
+    
+    def __str__(self) -> str:
+        return f"[id: {self.id}, ip: {self.ip}, finished: {self.finished}]"

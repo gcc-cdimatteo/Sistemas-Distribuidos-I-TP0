@@ -79,53 +79,57 @@ func (c *Client) HandleShutdown() {
 }
 
 // StartClientLoop Send messages to the client until some time threshold is met
-func (c *Client) StartClientLoop() {
+func (c *Client) StartClientLoop() error {
 	go c.HandleShutdown()
 
 	bets, err := c.GetBetData()
 
 	if err != nil {
 		log.Criticalf("action: agency file read | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return
+		return err
 	}
 
 	log.Debugf("action: bets send | result: in progress | client_id: %v", c.config.ID)
+
+	// Start client connecion
+	err = c.createClientSocket()
+
+	if !c.lives || c.conn == nil {
+		log.Criticalf("server socket closed or client no longer lives")
+		return fmt.Errorf("server socket closed or client no longer lives")
+	}
+
+	if err != nil {
+		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		c.lives = false
+		return err
+	}
 
 	err = c.SendBets(bets)
 
 	if err != nil {
 		log.Criticalf("action: bets send | result: fail | client_id: %v", c.config.ID)
-		return
+		return err
 	}
 
 	log.Debugf("action: bets send | result: success | client_id: %v", c.config.ID)
 
-	for {
-		message_received, err := c.Send("WIN\n")
+	winners, err := c.Send(fmt.Sprintf("CON|%v", c.config.ID))
 
-		if message_received == "Y\n" {
-			winners, err := c.Send(fmt.Sprintf("CON|%v", c.config.ID))
-
-			if winners == "\n" {
-				log.Infof("action: consulta_ganadores | result: success | cant_ganadores: 0")
-			} else {
-				log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(strings.Split(winners, "|")))
-			}
-
-			if err != nil {
-				log.Criticalf("action: consulta_ganadores | result: fail | error: %v", err)
-			}
-
-			break
-		}
-
-		if err != nil {
-			log.Criticalf("action: ask for winner | result: fail")
-			break
-		}
-
-		time.Sleep(c.config.LoopPeriod)
+	if err != nil {
+		log.Criticalf("action: consulta_ganadores | result: fail | error: %v", err)
+		return err
 	}
+
+	if winners == "\n" {
+		log.Infof("action: consulta_ganadores | result: success | cant_ganadores: 0")
+	} else {
+		log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(strings.Split(winners, "|")))
+	}
+
+	c.conn.Close()
+
+	return nil
 }
 
 func (c *Client) GetBetData() ([]Bet, error) {
@@ -219,25 +223,12 @@ func (c *Client) SendBatch(batch Batch, batchNumber int) {
 }
 
 func (c *Client) Send(message string) (string, error) {
-	err := c.createClientSocket()
-
-	if !c.lives || c.conn == nil {
-		log.Criticalf("server socket closed or client no longer lives")
-		return "", fmt.Errorf("server socket closed or client no longer lives")
-	}
-
-	if err != nil {
-		log.Criticalf("action: connect | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		c.lives = false
-		return "", err
-	}
-
 	messageBytes := []byte(message)
 
 	buffer := new(bytes.Buffer)
 
 	// Message's length
-	err = binary.Write(buffer, binary.BigEndian, uint32(len(messageBytes)))
+	err := binary.Write(buffer, binary.BigEndian, uint32(len(messageBytes)))
 	if err != nil {
 		log.Errorf("action: write_length | result: fail | client_id: %v | error: %v", c.config.ID, err)
 		return "", err
@@ -259,8 +250,6 @@ func (c *Client) Send(message string) (string, error) {
 
 	// Get Response
 	messageReceived, err := c.Recv()
-
-	c.conn.Close()
 
 	if err != nil {
 		log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
