@@ -21,7 +21,7 @@ class Server:
     
     def _handle_exit(self, signum, frame):
         self._server_running = False
-        for client in self.clients_connected:
+        for client in self.clients:
             logging.warn(f'connection with address {client} gracefully closed')
             client.close()
         self._server_socket.close()
