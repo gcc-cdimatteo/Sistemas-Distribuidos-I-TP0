@@ -134,6 +134,8 @@ class Server:
     def process_message(self, client: Client):
         msg = client.recv()
 
+        logging.debug(f"MESSAGE RECEIVED: {msg.content}")
+
         if msg.empty(): return
 
         if msg.is_BET(): 
