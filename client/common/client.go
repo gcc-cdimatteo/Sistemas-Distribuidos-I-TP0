@@ -175,11 +175,17 @@ func (c *Client) Send(message string) (string, error) {
 		return "", err
 	}
 
+	messageLength := buffer.Len()
+	bytesSent := 0
+
 	// Send the complete binary message
-	_, err = c.conn.Write(buffer.Bytes())
-	if err != nil {
-		log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return "", err
+	for bytesSent < messageLength {
+		n, err := c.conn.Write(buffer.Bytes())
+		if err != nil {
+			log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return "", err
+		}
+		bytesSent += n
 	}
 
 	// Get Response
