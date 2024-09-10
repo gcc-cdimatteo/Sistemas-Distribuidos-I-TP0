@@ -15,7 +15,7 @@ class Server:
 
         self.clients: set[Client] = set()
         
-        self.bets = None
+        self.winners: list[Bet] = []
 
         signal.signal(signal.SIGTERM, self._handle_exit)
     
@@ -103,17 +103,17 @@ class Server:
                     client.send(f"N\n")
                     return
             
-            if self.bets == None: self.bets = list(load_bets())
+            if len(self.winners) == 0: self.load_winners()
             logging.debug('action: receive_ask_winners | result: success')
             client.send(f"Y\n")
 
-            logging.debug(f'action: load bets | result: success | count: {len(self.bets)}')
+            logging.debug(f'action: load bets | result: success | count: {len(self.winners)}')
                     
         elif msg.is_CON():
             logging.debug('action: receive_consult | result: in progress')
             id = msg.get_agency_id()
-            winners = self.get_winners(id)
-            winners_message = '|'.join([winner.document for winner in winners])
+            local_winners = self.get_local_winners(id)
+            winners_message = '|'.join([winner.document for winner in local_winners])
             logging.debug(f'about to send message {winners_message}')
             client.send(f"{winners_message}\n")
             logging.debug('action: receive_consult | result: success')
@@ -139,12 +139,10 @@ class Server:
         store_bets(bets)
 
         return (len(bets), rejected_bets)
-
-    def get_winners(self, id: int) -> list[Bet]:
-        winners = []
-
-        for bet in self.bets:
-            if bet.agency == int(id) and has_won(bet): 
-                winners.append(bet)
-
-        return winners
+    
+    def load_winners(self):
+        for b in load_bets():
+            if has_won(b): self.winners.append(b)
+        
+    def get_local_winners(self, id: int) -> list[Bet]:
+        return [b for b in self.winners if int(b.agency) == int(id)]
