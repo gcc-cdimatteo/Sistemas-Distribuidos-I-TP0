@@ -18,13 +18,13 @@ class Server:
         manager = Manager()
 
         ## Clients Management
-        self.winners_barrier = manager.Barrier(Server.MAX_CLIENTS) ## ONLY WORKS FOR 5 AGENCIES - TODO: fix
+        self.winners_barrier = Barrier(Server.MAX_CLIENTS) ## ONLY WORKS FOR 5 AGENCIES - TODO: fix
         self.clients_connected = manager.list()
         self.clients_connected_lock = manager.Lock()
 
         ## Bets Management
-        self.bets = manager.list()
-        self.bets_lock = manager.Lock()
+        self.winners = manager.list()
+        self.winners_lock = manager.Lock()
         self.bets_file_lock = manager.Lock()
 
         signal.signal(signal.SIGTERM, self.handle_exit)
@@ -148,7 +148,7 @@ class Server:
         elif msg.is_END():
             client.send(f"END ACK\n")
             logging.debug('action: receive_end | result: success')
-            self.process_winners() ## blocks until last client
+            self.raffle()
         
         elif msg.is_CON():
             logging.debug('action: receive_ask_winners | result: in progress')
@@ -178,35 +178,44 @@ class Server:
 
         return rejected_bets
 
-    def process_winners(self):
-        if self.winners_barrier.n_waiting == Server.MAX_CLIENTS - 1: ## last ask
-            self.bets_lock.acquire() ## at this point nobody should have the lock
-            self.bets[:] = list(load_bets())
-            self.bets_lock.release()
+    def raffle(self):
+        logging.debug('raffle waiting in the barrier')
+        n = self.winners_barrier.wait()
+        logging.debug(f'raffle already waited in the barrier - n: {n}')
+
+        if n == 0: ## at this point nobody should have the lock but do it either as a good practice
+            self.winners_lock.acquire()
+            self.bets_file_lock.acquire()
+            for b in load_bets():
+                if has_won(b): self.winners.append(b)
+            self.bets_file_lock.release()
+            self.winners_lock.release()
             logging.info('action: sorteo | result: success')
-        
-        self.winners_barrier.wait()
 
     def return_winners(self, client: Client):
-        winners = self.load_winners(client)
-        client.send(f"{'|'.join([winner.document for winner in winners])}\n")
+        logging.debug('return_winners waiting in the barrier')
+        n = self.winners_barrier.wait()
+        logging.debug(f'return_winners already waited in the barrier - n: {n}')
+
+        local_winners = self.load_winners(client)
+        client.send(f"{'|'.join([winner.document for winner in local_winners])}\n")
     
     def load_winners(self, client: Client) -> list[Bet]:
         logging.debug(f'load_winners - try to acquire winners lock - client {client}')
-        self.bets_lock.acquire()
+        self.winners_lock.acquire()
         logging.debug(f'load_winners - acquire winners lock - client {client}')
 
-        winners: list[Bet] = []
+        local_winners: list[Bet] = []
 
-        logging.debug(f'client {client} - self.bets has {len(self.bets)} rows')
+        logging.debug(f'client {client} - self.bets has {len(self.winners)} rows')
 
-        for bet in self.bets:
-            if int(bet.agency) == int(client.id) and has_won(bet):
-                winners.append(bet)
+        for bet in self.winners:
+            if int(bet.agency) == int(client.id):
+                local_winners.append(bet)
 
-        logging.debug(f'winners for client {client} are {winners} rows')
+        logging.debug(f'winners for client {client} are {local_winners} rows')
 
-        self.bets_lock.release()
+        self.winners_lock.release()
         logging.debug(f'load_winners - release winners lock - client {client}')
         
-        return winners
+        return local_winners

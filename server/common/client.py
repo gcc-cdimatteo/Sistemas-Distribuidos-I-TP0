@@ -24,18 +24,20 @@ class Client:
     def set_winners(self, winners: list[Bet]): 
         self.winners = winners
 
-    def recv(self) -> Message:
-        raw_content_length = self.socket.recv(4)
-        if not raw_content_length: return None
-        
-        content_length = struct.unpack('>I', raw_content_length)[0]
-
+    def read_exactly(self, n):
         msg = b''
-        while len(msg) < content_length:
-            packet = self.socket.recv(content_length - len(msg))
+        while len(msg) < n:
+            packet = self.socket.recv(n - len(msg))
             if not packet:
                 return None
             msg += packet
+        
+        return msg
+    
+    def recv(self) -> Message:
+        content_length = struct.unpack('>I', self.read_exactly(4))[0]
+        
+        msg = self.read_exactly(content_length)
         
         return Message(msg.decode('utf-8'))
 
