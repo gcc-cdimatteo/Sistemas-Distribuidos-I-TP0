@@ -1,14 +1,15 @@
 package common
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -80,16 +81,24 @@ func (c *Client) HandleShutdown() {
 func (c *Client) StartClientLoop() {
 	go c.HandleShutdown()
 
-	bets, err := c.GetBetData()
+	log.Debugf("action: open file | result: in progress | client_id: %v", c.config.ID)
 
+	filePath := fmt.Sprintf("/dataset/agency-%v.csv", c.config.ID)
+	file, err := os.Open(filePath)
 	if err != nil {
-		log.Criticalf("action: agency file read | result: fail | client_id: %v | error: %v", c.config.ID, err)
+		log.Errorf("could not open file %s: %v", filePath, err)
 		return
 	}
 
+	log.Debugf("action: open file | result: success | client_id: %v", c.config.ID)
+
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
 	log.Debugf("action: bets send | result: in progress | client_id: %v", c.config.ID)
 
-	err = c.SendBets(bets)
+	err = c.SendBets(reader)
 
 	if err != nil {
 		log.Criticalf("action: bets send | result: fail | client_id: %v", c.config.ID)
@@ -99,69 +108,61 @@ func (c *Client) StartClientLoop() {
 	log.Debugf("action: bets send | result: success | client_id: %v", c.config.ID)
 }
 
-func (c *Client) GetBetData() ([]Bet, error) {
-	filePath := fmt.Sprintf("/dataset/agency-%v.csv", c.config.ID)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("could not open file %s: %v", filePath, err)
-	}
-	defer file.Close()
+func (c *Client) SendBets(reader *bufio.Reader) error {
+	lastBatch := NewBatch()
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("could not read CSV data: %v", err)
-	}
-
-	var bets []Bet
-	for _, record := range records {
-		bet := Bet{
-			agencia:    c.config.ID,
-			nombre:     record[0],
-			apellido:   record[1],
-			documento:  record[2],
-			nacimiento: record[3],
-			numero:     record[4],
-		}
-		bets = append(bets, bet)
-	}
-
-	return bets, nil
-}
-
-func (c *Client) SendBets(bets []Bet) error {
-	var batches []Batch
-
-	batches = append(batches, NewBatch())
-	lastBatch := batches[len(batches)-1]
-
-	for i, bet := range bets {
+	for {
 		if !c.lives {
 			log.Criticalf("action: batch process | result: fail | client_id: %v | error: connection closed", c.config.ID)
 			return fmt.Errorf("client no longer lives")
 		}
 
+		line, err := reader.ReadString('\n')
+
+		if err == io.EOF {
+			c.SendBatch(lastBatch)
+			time.Sleep(c.config.BatchSleep)
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+
+		lineSplitted := strings.Split(strings.TrimSpace(line), ",")
+
+		if len(lineSplitted) < 5 {
+			continue
+		}
+
+		bet := Bet{
+			agencia:    c.config.ID,
+			nombre:     lineSplitted[0],
+			apellido:   lineSplitted[1],
+			documento:  lineSplitted[2],
+			nacimiento: lineSplitted[3],
+			numero:     lineSplitted[4],
+		}
+
 		if !lastBatch.CanHandle(bet, c.config.BatchMaxAmount) {
-			c.SendBatch(lastBatch, len(batches))
+			c.SendBatch(lastBatch)
 			time.Sleep(c.config.BatchSleep)
 
-			batches = append(batches, NewBatch())
-			lastBatch = batches[len(batches)-1]
+			lastBatch = NewBatch()
 		}
 
 		lastBatch.AppendBet(bet)
-
-		if i == len(bets)-1 {
-			c.SendBatch(lastBatch, len(batches))
-			time.Sleep(c.config.BatchSleep)
-		}
 	}
 
-	return fmt.Errorf("final message sent with error")
+	return nil
 }
 
-func (c *Client) SendBatch(batch Batch, batchNumber int) {
-	log.Debugf("action: batch send | result: in progress | batch n°: %v", batchNumber)
+func (c *Client) SendBatch(batch Batch) {
+	if batch.size == 0 {
+		return
+	}
+
+	log.Debugf("action: batch send | result: in progress | batch size: %v", batch.size)
 
 	message := batch.Serialize()
 
@@ -181,9 +182,9 @@ func (c *Client) SendBatch(batch Batch, batchNumber int) {
 	)
 
 	if messageReceived == "ACK\n" {
-		log.Debugf("action: batch send | result: success | batch n°: %v", batchNumber)
+		log.Debugf("action: batch send | result: success | batch size: %v", batch.size)
 	} else {
-		log.Warningf("action: batch send | result: fail | batch n°: %v | error: %s", batchNumber, messageReceived)
+		log.Warningf("action: batch send | result: fail | batch size: %v | error: %s", batch.size, messageReceived)
 	}
 }
 
@@ -218,11 +219,17 @@ func (c *Client) Send(message string) (string, error) {
 		return "", err
 	}
 
+	messageLength := buffer.Len()
+	bytesSent := 0
+
 	// Send the complete binary message
-	_, err = c.conn.Write(buffer.Bytes())
-	if err != nil {
-		log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-		return "", err
+	for bytesSent < messageLength {
+		n, err := c.conn.Write(buffer.Bytes())
+		if err != nil {
+			log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+			return "", err
+		}
+		bytesSent += n
 	}
 
 	// Get Response
